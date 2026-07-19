@@ -1,4 +1,4 @@
-# kiro-acp-ollama-emulator
+# Kiro CLI ACP Ollama Emulator
 
 Expose [Kiro CLI](https://kiro.dev/docs/cli/) as a **local Ollama-compatible server**, using the **Agent Client Protocol (ACP)** under the hood.
 
