@@ -1,0 +1,17 @@
+# Python dependencies for the example clients.
+# Versions below are the ones these examples were tested against; bump as needed.
+
+# Strands core + the Ollama model provider (the `[ollama]` extra pulls in the
+# `ollama` client that OllamaModel needs). Required by ALL examples.
+# Note: `mcp` ships as a core dependency of strands-agents, so example 3's
+# `import mcp` works from this install alone.
+strands-agents[ollama]>=1.48.0
+
+# Built-in tools used by 2-agent_with_tools.py (imported as `strands_tools`):
+# calculator, current_time, etc.
+strands-agents-tools>=0.8.4
+
+# MCP Python SDK. Already required transitively by strands-agents, but listed
+# explicitly because 3-strands-mcp.py imports it directly
+# (mcp.stdio_client, mcp.client.streamable_http).
+mcp>=1.23.0

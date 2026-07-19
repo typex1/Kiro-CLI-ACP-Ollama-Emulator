@@ -1,0 +1,20 @@
+{
+  "name": "kiro-acp-ollama-emulator",
+  "version": "1.0.0",
+  "description": "Expose Kiro CLI as a local Ollama-compatible server (ACP bridge) so tools like Strands Agents can use Kiro as their model provider",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node test/prompt.test.js"
+  },
+  "keywords": [
+    "kiro",
+    "acp",
+    "ollama",
+    "strands",
+    "mcp",
+    "ai-agent"
+  ],
+  "license": "MIT-0",
+  "dependencies": {}
+}
