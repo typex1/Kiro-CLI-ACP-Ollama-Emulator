@@ -3,7 +3,6 @@ from strands import Agent, tool
 from strands_tools import calculator, current_time
 from strands.models.ollama import OllamaModel
 
-
 @tool
 def letter_counter(word: str, letter: str) -> int:
     """Count occurrences of a specific letter in a word.
@@ -28,7 +27,7 @@ SYSTEM_PROMPT = """You are a personal assistant. Be professional, warm, and help
 
 ollama_model = OllamaModel(
     host="http://localhost:11435",
-    model_id="Claude Opus 4.8",
+    model_id="Kiro",
 )
 
 agent = Agent(model=ollama_model, tools=[calculator, current_time, letter_counter], system_prompt=SYSTEM_PROMPT)

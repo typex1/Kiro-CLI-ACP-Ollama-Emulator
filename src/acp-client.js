@@ -42,7 +42,8 @@ class AcpClient extends EventEmitter {
    * Note: sessions are created per request via createSession(), not here.
    */
   async start() {
-    const args = ["acp", "--trust-all-tools"];
+    // const args = ["acp", "--trust-all-tools"];
+    const args = ["acp"];
     const agent = process.env.KIRO_AGENT;
     if (agent) args.push("--agent", agent);
 
