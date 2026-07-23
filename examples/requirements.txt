@@ -15,3 +15,6 @@ strands-agents-tools>=0.8.4
 # explicitly because 3-strands-mcp.py imports it directly
 # (mcp.stdio_client, mcp.client.streamable_http).
 mcp>=1.23.0
+
+# DuckDuckGo search — used by 3-strands-mcp-websearch.py for web_search tool.
+duckduckgo-search>=8.0.0
