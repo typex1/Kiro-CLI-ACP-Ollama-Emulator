@@ -58,10 +58,14 @@ class AcpClient extends EventEmitter {
     // Model that Kiro CLI actually runs. This is the real model behind the
     // emulator — the model_id an Ollama client sends is only a label and does
     // not affect this. Leave KIRO_MODEL unset to use Kiro's default.
-    const model = process.env.KIRO_MODEL;
-    if (model) args.push("--model", model);
+    //
+    // KIRO_MODEL is NOT passed as `--model`: that flag only applies to the
+    // first ACP session, and this client opens a fresh session per request.
+    // createSession() sets the model on every session instead.
 
     // Optional reasoning effort: low | medium | high | xhigh | max.
+    // Note: like --model, --effort only applies to the first session, and it
+    // makes kiro-cli use its other ACP engine (see _applyModel()).
     const effort = process.env.KIRO_EFFORT;
     if (effort) args.push("--effort", effort);
 
@@ -100,6 +104,9 @@ class AcpClient extends EventEmitter {
     console.log(
       `[acp] Connected: ${init.agentInfo?.name || "kiro"} ${init.agentInfo?.version || ""}`.trim()
     );
+    if (process.env.KIRO_MODEL) {
+      console.log(`[acp] Model: ${process.env.KIRO_MODEL} (applied to every session)`);
+    }
 
     return this.agentInfo;
   }
@@ -107,13 +114,66 @@ class AcpClient extends EventEmitter {
   /**
    * Create a new ACP session and return its id.
    * A fresh session gives each Ollama request an isolated, stateless context.
+   * If KIRO_MODEL is set, the model is applied to this session (see _applyModel).
    */
   async createSession() {
     const session = await this._request("session/new", {
       cwd: WORKSPACE,
       mcpServers: [],
     });
+    const model = process.env.KIRO_MODEL;
+    if (model) await this._applyModel(session, model);
     return session.sessionId;
+  }
+
+  /**
+   * Set the model for one session. kiro-cli has two ACP engines that expose
+   * this differently; pick the call from the shape of the session/new result:
+   *
+   *   - default engine: result has `configOptions` with an option
+   *     {id: "model", category: "model"} → session/set_config_option
+   *   - engine used when started with --effort ("Kiro CLI Agent 3.0.0"):
+   *     result has `models` → session/set_model
+   *
+   * An unknown model id fails the request with the list of valid ids, rather
+   * than silently running on the default model.
+   */
+  async _applyModel(session, model) {
+    const { sessionId } = session;
+    const option = (session.configOptions || []).find(
+      (o) => o.category === "model" || o.id === "model"
+    );
+
+    if (option) {
+      const valid = (option.options || []).map((o) => o.value);
+      if (valid.length && !valid.includes(model)) {
+        throw new Error(`KIRO_MODEL "${model}" is not available. Valid: ${valid.join(", ")}`);
+      }
+      if (option.currentValue === model) return;
+      await this._request("session/set_config_option", {
+        sessionId,
+        configId: option.id,
+        value: model,
+      });
+      return;
+    }
+
+    if (session.models) {
+      const valid = (session.models.availableModels || []).map((m) => m.modelId);
+      if (valid.length && !valid.includes(model)) {
+        throw new Error(`KIRO_MODEL "${model}" is not available. Valid: ${valid.join(", ")}`);
+      }
+      if (session.models.currentModelId === model) return;
+      await this._request("session/set_model", { sessionId, modelId: model });
+      return;
+    }
+
+    if (!this._warnedNoModelSupport) {
+      console.error(
+        `[acp] KIRO_MODEL="${model}" ignored: this kiro-cli does not report a selectable model`
+      );
+      this._warnedNoModelSupport = true;
+    }
   }
 
   /**

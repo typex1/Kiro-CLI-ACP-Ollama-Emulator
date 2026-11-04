@@ -133,19 +133,21 @@ All optional — defaults work out of the box. Set via `.env` or environment var
 | `KIRO_CLI_PATH` | `kiro-cli` | Path to the kiro-cli binary |
 | `KIRO_WORKSPACE` | cwd | Working directory for Kiro |
 | `KIRO_AGENT` | — | Named Kiro agent to use for sessions |
-| `KIRO_MODEL` | Kiro default | Model Kiro CLI actually runs (`--model`). **This picks the real model** — see below |
-| `KIRO_EFFORT` | — | Reasoning effort: `low` / `medium` / `high` / `xhigh` / `max` |
+| `KIRO_MODEL` | Kiro default | Model Kiro CLI actually runs, set on every ACP session. **This picks the real model** — see below |
+| `KIRO_EFFORT` | — | Reasoning effort (`--effort`): `low` / `medium` / `high` / `xhigh` / `max`. Only applies to the first ACP session — see below |
 | `KIRO_TIMEOUT` | `120000` | ACP request timeout (ms) |
 
 ### Which model actually answers?
 
-The `model_id` your Ollama client sends (e.g. `OllamaModel(model_id="...")`) is **only a label** — the bridge ignores it. The real model is chosen by Kiro CLI. To control it, set `KIRO_MODEL`, which is passed to `kiro-cli acp --model <id>` when the ACP process starts:
+The `model_id` your Ollama client sends (e.g. `OllamaModel(model_id="...")`) is **only a label** — the bridge ignores it. The real model is chosen by Kiro CLI. To control it, set `KIRO_MODEL`:
 
 ```bash
-KIRO_MODEL=claude-sonnet-4 npm start
+KIRO_MODEL=claude-haiku-4.5 npm start
 ```
 
-Leave `KIRO_MODEL` unset to use Kiro's default. Valid model IDs depend on your Kiro account/backend.
+List the valid IDs for your account with `kiro-cli chat --list-models`. An unknown ID fails each request with the list of valid IDs instead of silently using the default. Leave `KIRO_MODEL` unset to use Kiro's default (`auto`).
+
+How it works: the bridge opens a fresh ACP session per request, and `kiro-cli acp --model` only applies to the first session. So instead of passing `--model`, the bridge sets the model right after each `session/new`: via `session/set_config_option` (`configId: "model"`) on kiro-cli's default ACP engine, or via `session/set_model` on the engine kiro-cli switches to when started with `--effort`. The same first-session-only limit applies to `KIRO_EFFORT`, and there is no per-session effort option to work around it.
 
 ## Structured output
 
