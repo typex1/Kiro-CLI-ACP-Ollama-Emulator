@@ -13,4 +13,5 @@ if [ ! -d node_modules ]; then
 fi
 
 echo "🚀 Starting Kiro ACP Ollama Emulator..."
-npm start
+# run kiro-cli chat --list-models to find out about model names
+KIRO_MODEL=claude-haiku-4.5 npm start
