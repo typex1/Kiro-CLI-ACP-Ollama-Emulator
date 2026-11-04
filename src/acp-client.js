@@ -21,6 +21,14 @@ const KIRO_CLI = process.env.KIRO_CLI_PATH || "kiro-cli";
 const WORKSPACE = process.env.KIRO_WORKSPACE || process.cwd();
 const REQUEST_TIMEOUT = Number(process.env.KIRO_TIMEOUT || 120_000);
 
+/** JSON-RPC 2.0 "Method not found" — returned for requests we don't implement. */
+class MethodNotFoundError extends Error {
+  constructor(method) {
+    super(`Method not found: ${method}`);
+    this.code = -32601;
+  }
+}
+
 class AcpClient extends EventEmitter {
   constructor() {
     super();
@@ -204,6 +212,23 @@ class AcpClient extends EventEmitter {
   }
 
   _handleMessage(msg) {
+    // JSON-RPC 2.0: a message WITH "method" is a request (has id) or a
+    // notification (no id) from Kiro; only messages WITHOUT "method" are
+    // responses to our requests. Check "method" first — Kiro numbers its own
+    // requests independently, so their ids can collide with our pending ids
+    // (e.g. Kiro's _kiro/terminal/shell_type arriving as id 1 while our
+    // session/new is pending as id 1 was mistaken for its response).
+
+    // Server request (needs response) — e.g., fs/readTextFile
+    if (msg.method && msg.id !== undefined) {
+      this._handleServerRequest(msg);
+      return;
+    }
+    // Notification (no id)
+    if (msg.method) {
+      this.emit("notification", msg.method, msg.params || {});
+      return;
+    }
     // Response to our request
     if (msg.id !== undefined && this.pending.has(msg.id)) {
       const { resolve, reject, timeout } = this.pending.get(msg.id);
@@ -211,16 +236,6 @@ class AcpClient extends EventEmitter {
       this.pending.delete(msg.id);
       if (msg.error) reject(new Error(msg.error.message));
       else resolve(msg.result);
-      return;
-    }
-    // Server request (needs response) — e.g., fs/readTextFile
-    if (msg.id !== undefined && msg.method) {
-      this._handleServerRequest(msg);
-      return;
-    }
-    // Notification (no id)
-    if (msg.method) {
-      this.emit("notification", msg.method, msg.params || {});
     }
   }
 
@@ -232,7 +247,8 @@ class AcpClient extends EventEmitter {
       this._send({
         jsonrpc: "2.0",
         id: msg.id,
-        error: { code: -32000, message: err.message },
+        // -32601 for unknown methods (see MethodNotFoundError), -32000 otherwise.
+        error: { code: err.code ?? -32000, message: err.message },
       });
     }
   }
@@ -269,8 +285,22 @@ class AcpClient extends EventEmitter {
         });
         return { output: out };
       }
+      // Kiro-specific extension: Kiro asks which shell its terminal commands
+      // will run in, so it can phrase them correctly. Answer with the basename
+      // of $SHELL (e.g. "bash", "zsh"), falling back to "bash".
+      case "_kiro/terminal/shell_type": {
+        const shellType = path.basename(process.env.SHELL || "bash");
+        return { shellType };
+      }
       default:
-        throw new Error(`Unsupported: ${method}`);
+        // ACP reserves "_"-prefixed methods for vendor extensions. A client
+        // that doesn't implement one should answer JSON-RPC -32601 (Method
+        // not found) rather than a generic failure, so the agent can carry on.
+        // Log it so the next missing extension is easy to spot.
+        console.error(
+          `[acp] unsupported request from Kiro: ${method} params=${JSON.stringify(params)}`
+        );
+        throw new MethodNotFoundError(method);
     }
   }
 }
