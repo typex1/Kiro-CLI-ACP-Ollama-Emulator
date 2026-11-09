@@ -122,7 +122,7 @@ The server speaks a subset of the [Ollama REST API](https://github.com/ollama/ol
 | `session/new` | Create a fresh session per request |
 | `session/prompt` | Send the flattened prompt to Kiro |
 
-The bridge also handles server-initiated requests from Kiro (`fs/readTextFile`, `fs/writeTextFile`, `terminal/execute`) so Kiro can use its tools in the workspace.
+The bridge does **not** let Kiro use its own tools: tool calls are made only by the client (e.g. Strands). kiro-cli is started with a tool-less agent shipped in this repo (`.kiro/agents/ollama-emulator.json`), the bridge advertises no file system or terminal capabilities, refuses `fs/*` and `terminal/*` requests, and answers every `session/request_permission` with "Deny".
 
 ## Configuration
 
@@ -136,7 +136,7 @@ All optional — defaults work out of the box. Set via `.env` or environment var
 | `OLLAMA_TOOLCALLS` | `on` | Tool-call emulation; set `off` to ignore request `tools` |
 | `KIRO_CLI_PATH` | `kiro-cli` | Path to the kiro-cli binary |
 | `KIRO_WORKSPACE` | cwd | Working directory for Kiro |
-| `KIRO_AGENT` | — | Named Kiro agent to use for sessions |
+| `KIRO_AGENT` | `ollama-emulator` | Kiro agent for sessions. The default is tool-less; an agent with tools lets Kiro act on the workspace by itself |
 | `KIRO_MODEL` | Kiro default | Model Kiro CLI actually runs, set on every ACP session. **This picks the real model** — see below |
 | `KIRO_EFFORT` | — | Reasoning effort (`--effort`): `low` / `medium` / `high` / `xhigh` / `max`. Only applies to the first ACP session — see below |
 | `KIRO_TIMEOUT` | `120000` | ACP request timeout (ms) |
@@ -220,4 +220,4 @@ sudo systemctl enable --now kiro-ollama-emulator
 
 ## Security note
 
-By default the server binds to `127.0.0.1` (localhost only) and has **no authentication**. If you set `OLLAMA_HOST=0.0.0.0` to expose it on your network, anyone who can reach the port can drive Kiro CLI in your workspace — including file writes and terminal commands via Kiro's tools. Only do this on trusted networks, and consider a firewall or reverse proxy with auth in front.
+By default the server binds to `127.0.0.1` (localhost only) and has **no authentication**. If you set `OLLAMA_HOST=0.0.0.0` to expose it on your network, anyone who can reach the port can drive Kiro CLI under your account. Kiro's own tools are disabled by default, but a custom `KIRO_AGENT` with tools would allow file writes and terminal commands. Only do this on trusted networks, and consider a firewall or reverse proxy with auth in front.

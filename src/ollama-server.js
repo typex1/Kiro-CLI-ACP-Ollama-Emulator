@@ -411,7 +411,8 @@ function buildPromptFromMessages(messages, format) {
   const systemParts = [];
   const turns = [];
 
-  for (const msg of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
     const role = msg.role || "user";
     let content = typeof msg.content === "string" ? msg.content : "";
 
@@ -431,6 +432,13 @@ function buildPromptFromMessages(messages, format) {
       content = content ? `${content}\n${line}` : line;
     }
 
+    // A tool result must never be dropped, even when empty (e.g. an MCP tool
+    // returning content: []). Otherwise Kiro never sees that the call ran and
+    // requests the same function again and again.
+    if (role === "tool" && !content.trim()) {
+      content = "(empty result — the function ran successfully but returned no data)";
+    }
+
     if (!content) continue;
 
     if (role === "system") {
@@ -440,6 +448,17 @@ function buildPromptFromMessages(messages, format) {
       turns.push(`Function result: ${content}`);
     } else if (role === "assistant") {
       turns.push(`Assistant: ${content}`);
+      // Strands' OllamaModel sends one "tool" message per result content item,
+      // so a tool that returns NO content (e.g. an MCP tool with content: [])
+      // produces no "tool" message at all. Add the empty result explicitly —
+      // otherwise Kiro thinks the call never ran and repeats it in a loop.
+      const calledTools = Array.isArray(msg.tool_calls) && msg.tool_calls.length;
+      const next = messages[i + 1];
+      if (calledTools && (!next || next.role !== "tool")) {
+        turns.push(
+          "Function result: (empty result — the function ran successfully but returned no data)"
+        );
+      }
     } else {
       turns.push(`User: ${content}`);
     }
@@ -516,8 +535,14 @@ function withToolInstruction(prompt, tools) {
     "- If you need to call one or more functions, respond with ONLY this JSON object",
     "  and nothing else (no prose, no markdown code fences):",
     '  {"tool_calls": [{"name": "<function_name>", "arguments": { <args matching the schema> }}]}',
-    "- If a 'Function result:' for what you need is already present above and you can",
-    "  now answer, respond with the final answer as plain text (no JSON).",
+    "- ONLY when the user's request is completely fulfilled and every needed",
+    "  'Function result:' is already present above, respond with the final answer as",
+    "  plain text (no JSON).",
+    "",
+    "Important: plain text ends the conversation. NEVER announce or describe a",
+    "function call you intend to make (e.g. \"I will now fetch ...\") in plain text -",
+    "emit the JSON tool_calls object instead. If more steps are still needed after a",
+    "'Function result:', your next reply must be another JSON tool_calls object.",
     "",
     "Only call functions that are listed above. Output the JSON on a single logical",
     "object with no surrounding text when calling a function.",

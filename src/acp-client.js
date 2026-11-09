@@ -21,6 +21,14 @@ const KIRO_CLI = process.env.KIRO_CLI_PATH || "kiro-cli";
 const WORKSPACE = process.env.KIRO_WORKSPACE || process.cwd();
 const REQUEST_TIMEOUT = Number(process.env.KIRO_TIMEOUT || 120_000);
 
+// Kiro must act as a pure language model: every tool call is made by the
+// client (e.g. Strands), never by Kiro itself. We therefore start kiro-cli with
+// a tool-less agent shipped in this repo (.kiro/agents/ollama-emulator.json).
+// Workspace agents are discovered relative to kiro-cli's working directory, so
+// kiro-cli is spawned in the repo root (see start()).
+const REPO_ROOT = require("path").resolve(__dirname, "..");
+const DEFAULT_AGENT = "ollama-emulator";
+
 /** JSON-RPC 2.0 "Method not found" — returned for requests we don't implement. */
 class MethodNotFoundError extends Error {
   constructor(method) {
@@ -50,10 +58,11 @@ class AcpClient extends EventEmitter {
    * Note: sessions are created per request via createSession(), not here.
    */
   async start() {
-    // const args = ["acp", "--trust-all-tools"];
     const args = ["acp"];
-    const agent = process.env.KIRO_AGENT;
-    if (agent) args.push("--agent", agent);
+    // Tool-less agent by default; KIRO_AGENT overrides it (at your own risk —
+    // an agent with tools lets Kiro act on the workspace by itself).
+    const agent = process.env.KIRO_AGENT || DEFAULT_AGENT;
+    args.push("--agent", agent);
 
     // Model that Kiro CLI actually runs. This is the real model behind the
     // emulator — the model_id an Ollama client sends is only a label and does
@@ -72,7 +81,8 @@ class AcpClient extends EventEmitter {
     this.proc = spawn(KIRO_CLI, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, KIRO_LOG_LEVEL: "error" },
-      cwd: WORKSPACE,
+      // Repo root so kiro-cli discovers .kiro/agents/ollama-emulator.json.
+      cwd: REPO_ROOT,
     });
 
     this.proc.stdout.on("data", (chunk) => this._onData(chunk));
@@ -91,12 +101,13 @@ class AcpClient extends EventEmitter {
       this.emit("exit", code);
     });
 
-    // Initialize — exchange capabilities
+    // Initialize — exchange capabilities. We deliberately advertise NO file
+    // system or terminal access: Kiro must not act on the workspace.
     const init = await this._request("initialize", {
       protocolVersion: 1,
       clientCapabilities: {
-        fs: { readTextFile: true, writeTextFile: true },
-        terminal: true,
+        fs: { readTextFile: false, writeTextFile: false },
+        terminal: false,
       },
       clientInfo: { name: "kiro-acp-ollama-emulator", version: "1.0.0" },
     });
@@ -104,6 +115,7 @@ class AcpClient extends EventEmitter {
     console.log(
       `[acp] Connected: ${init.agentInfo?.name || "kiro"} ${init.agentInfo?.version || ""}`.trim()
     );
+    console.log(`[acp] Agent: ${agent} (Kiro's own tool calls are rejected)`);
     if (process.env.KIRO_MODEL) {
       console.log(`[acp] Model: ${process.env.KIRO_MODEL} (applied to every session)`);
     }
@@ -286,6 +298,13 @@ class AcpClient extends EventEmitter {
     }
     // Notification (no id)
     if (msg.method) {
+      const u = msg.params?.update;
+      if (u?.sessionUpdate === "tool_call") {
+        // Should never happen with the tool-less agent; make it visible.
+        console.error(
+          `[acp] WARNING: Kiro attempted its own tool call: ${u.title || u.kind || "?"}`
+        );
+      }
       this.emit("notification", msg.method, msg.params || {});
       return;
     }
@@ -314,36 +333,42 @@ class AcpClient extends EventEmitter {
   }
 
   /**
-   * Handle requests FROM Kiro (tool execution).
-   * Kiro may request file reads, writes, or terminal commands.
+   * Handle requests FROM Kiro.
+   *
+   * Kiro must not use its own tools — tool calls belong to the client (e.g.
+   * Strands). So file system and terminal requests are refused, and every
+   * permission request is answered with "reject". This is defense in depth on
+   * top of the tool-less agent (.kiro/agents/ollama-emulator.json).
    */
   async _dispatch(method, params) {
-    const fs = require("fs");
     const path = require("path");
 
     switch (method) {
-      case "fs/readTextFile": {
-        const p = params.path.startsWith("/")
-          ? params.path
-          : path.join(WORKSPACE, params.path);
-        return { content: fs.readFileSync(p, "utf-8") };
+      case "session/request_permission": {
+        // Pick the agent-offered reject option (prefer a one-off reject).
+        const options = params.options || [];
+        const reject =
+          options.find((o) => o.kind === "reject_once") ||
+          options.find((o) => o.kind === "reject_always");
+        console.error(
+          `[acp] Rejected Kiro tool permission: ${params.toolCall?.title || "?"}`
+        );
+        return reject
+          ? { outcome: { outcome: "selected", optionId: reject.optionId } }
+          : { outcome: { outcome: "cancelled" } };
       }
-      case "fs/writeTextFile": {
-        const p = params.path.startsWith("/")
-          ? params.path
-          : path.join(WORKSPACE, params.path);
-        fs.mkdirSync(path.dirname(p), { recursive: true });
-        fs.writeFileSync(p, params.content, "utf-8");
-        return { success: true };
-      }
+      case "fs/read_text_file":
+      case "fs/readTextFile":
+      case "fs/write_text_file":
+      case "fs/writeTextFile":
+      case "terminal/create":
       case "terminal/execute": {
-        const { execSync } = require("child_process");
-        const out = execSync(params.command, {
-          cwd: WORKSPACE,
-          timeout: 30_000,
-          encoding: "utf-8",
-        });
-        return { output: out };
+        console.error(`[acp] Refused Kiro tool request: ${method}`);
+        const err = new Error(
+          `${method} is disabled: this bridge does not let Kiro use its own tools`
+        );
+        err.code = -32000;
+        throw err;
       }
       // Kiro-specific extension: Kiro asks which shell its terminal commands
       // will run in, so it can phrase them correctly. Answer with the basename
