@@ -10,6 +10,10 @@ If you're learning how Strands Agents work but don't have a local LLM or an API 
 
 It runs on **port 11435** (the real Ollama uses 11434), so the two can coexist.
 
+<p align="center">
+  <img src="img/Kiro-Ollama-Emulator.png" alt="Architecture diagram: a Strands Agent sends requests to the Ollama Emulator, which forwards them to Kiro CLI, which uses Kiro's LLMs to respond" width="400">
+</p>
+
 ```
 Strands Agent (OllamaModel) ──HTTP /api/chat──▶ this server ──ACP (JSON-RPC/stdio)──▶ kiro-cli acp ──▶ response
 ```
